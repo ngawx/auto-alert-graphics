@@ -1,18 +1,17 @@
 {
-  "name": "nws-alert-maps",
+  "name": "weather-alerts",
   "version": "1.0.0",
-  "main": "index.js",
+  "main": "generateMap.js",
+  "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node generateMap.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
   "dependencies": {
-    "@mapbox/polyline": "^1.2.1",
-    "canvas": "^3.1.0",
+    "canvas": "^2.11.2",
     "node-fetch": "^3.3.2",
-    "twitter-api-v2": "^1.22.0"
+    "polyline": "^1.1.1",
+    "twitter-api-v2": "^1.15.0",
+    "axios": "^1.6.7",
+    "form-data": "^4.0.0"
   }
 }

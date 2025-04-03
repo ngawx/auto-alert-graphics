@@ -2,35 +2,14 @@ const { createCanvas, loadImage } = require('canvas');
 const fs = require('fs');
 const polyline = require('@mapbox/polyline');
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
+const { postToTwitter } = require('./postToTwitter');
 
 const WIDTH = 800;
 const HEIGHT = 600;
 const PANEL_WIDTH = 250;
 const BANNER_HEIGHT = 50;
 const MAP_OFFSET_Y = 10;
-const mapboxToken = 'pk.eyJ1Ijoibmdhd3hjb21tYW5kIiwiYSI6ImNtNjM0bGh6NzBrNHUyaXE0bWpwYmxveWIifQ.GjaB91HeBsNjwyPYvuvzfg'; // Replace with your token
-
-const alert = {
-  properties: {
-    event: "Tornado Warning",
-    effective: "2025-03-31T18:40:00Z",
-    expires: "2025-03-31T19:15:00Z",
-    senderName: "NWS Peachtree City GA",
-    description: "A severe thunderstorm capable of producing a tornado was located near Jeffersonville, moving east at 40 mph. Tornado...OBSERVED. Hazard...winds up to 70 mph and quarter size hail. A tornado is possible with this storm.",
-    areaDesc: "Twiggs, Wilkinson, Baldwin, Jones"
-  },
-  geometry: {
-    type: "Polygon",
-    coordinates: [[
-      [-83.38, 32.68],
-      [-83.29, 32.67],
-      [-83.22, 32.71],
-      [-83.26, 32.76],
-      [-83.34, 32.75],
-      [-83.38, 32.68]
-    ]]
-  }
-};
+const mapboxToken = 'pk.eyJ1Ijoibmdhd3hjb21tYW5kIiwiYSI6ImNtNjM0bGh6NzBrNHUyaXE0bWpwYmxveWIifQ.GjaB91HeBsNjwyPYvuvzfg';
 
 function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
   const words = text.split(' ');
@@ -147,9 +126,9 @@ async function generateAlertMap(alert) {
     ctx.fill();
     ctx.fillStyle = "#ffffff";
     ctx.textAlign = "center";
-    ctx.font = "600 12px 'Segoe UI', sans-serif";
+    ctx.font = "600 13px 'Segoe UI', sans-serif";
     ctx.fillText(label, infoX + badgeWidth / 2, infoY + 15);
-    ctx.font = "500 11px 'Segoe UI', sans-serif";
+    ctx.font = "500 12px 'Segoe UI', sans-serif";
     ctx.fillText(new Date(time).toLocaleString("en-US", { timeZone: "America/New_York" }).toUpperCase(), infoX + badgeWidth / 2, infoY + 30);
     ctx.textAlign = "start";
     infoY += badgeHeight;
@@ -192,12 +171,14 @@ async function generateAlertMap(alert) {
       ctx.fillText(value, x + size / 2, y + size / 2 + 15);
       ctx.textAlign = "start";
     };
+
     const startX = infoX;
     const startY = infoY + 30;
     const boxSize = 100;
     const spacing = 8;
     const c1 = eventText.includes("TORNADO") ? "#D32F2F" : "#FBC02D";
     const c2 = eventText.includes("TORNADO") ? "#880E4F" : "#F57F17";
+
     drawGradientBadge(ctx, startX, startY, boxSize, c1, c2, "TORNADO", threats.tornado || "None");
     drawGradientBadge(ctx, startX + boxSize + spacing, startY, boxSize, c1, c2, "WIND", threats.wind !== 'N/A' ? `${threats.wind} mph` : "N/A");
     drawGradientBadge(ctx, startX, startY + boxSize + spacing, boxSize, c1, c2, "HAIL", threats.hail !== 'N/A' ? `${threats.hail} in"` : "N/A");
@@ -206,16 +187,60 @@ async function generateAlertMap(alert) {
   }
 
   const logo = await loadImage('./logo.png');
-  const logoWidth = 80;
+  const logoWidth = 64;
   const logoHeight = (logo.height / logo.width) * logoWidth;
-  ctx.drawImage(logo, 10, HEIGHT - 40 + (40 - logoHeight) / 2 + 2, logoWidth * 0.8, logoHeight * 0.8);
+  ctx.drawImage(logo, 10, HEIGHT - 40 + (40 - logoHeight) / 2 + 2, logoWidth, logoHeight);
 
-  const out = fs.createWriteStream('alert_map.png');
-  const stream = canvas.createPNGStream();
-  stream.pipe(out);
-  out.on('finish', () => console.log(`✅ Map image created: alert_map.png`));
+const fileName = `alert_${Date.now()}.png`;
+const out = fs.createWriteStream(fileName);
+const stream = canvas.createPNGStream();
+stream.pipe(out);
+
+out.on('finish', async () => {
+  console.log(`✅ Map image created: ${fileName}`);
+  
+  const caption = `${alert.properties.event} for ${alert.properties.areaDesc}\nExpires: ${new Date(alert.properties.expires).toLocaleTimeString('en-US', { timeZone: 'America/New_York' })}`;
+
+  try {
+    await postToTwitter(fileName, caption);
+    await postToFacebook(fileName, caption);
+  } catch (err) {
+    console.error('❌ Error posting to social media:', err);
+  }
+});
+
 }
 
-generateAlertMap(alert);
-module.exports = { generateAlertMap };
+// WATCHER LOGIC
+const seenAlerts = new Set();
 
+async function fetchLiveFFCAlerts() {
+  const url = 'https://api.weather.gov/alerts/active?area=GA';
+  const res = await fetch(url);
+  const json = await res.json();
+
+  return json.features.filter(
+    (a) =>
+      a.properties.senderName.includes('NWS Peachtree City GA') &&
+      ['Tornado Warning', 'Severe Thunderstorm Warning'].includes(a.properties.event)
+  );
+}
+
+async function checkAlerts() {
+  const alerts = await fetchLiveFFCAlerts();
+  for (const alert of alerts) {
+    const id = alert.id;
+    if (!seenAlerts.has(id)) {
+      console.log(`📢 New Alert: ${alert.properties.event} | ${alert.properties.areaDesc}`);
+      seenAlerts.add(id);
+      try {
+        await generateAlertMap(alert);
+      } catch (err) {
+        console.error('❌ Error generating image:', err);
+      }
+    }
+  }
+}
+
+setInterval(checkAlerts, 60 * 1000);
+console.log('🌀 Alert watcher running every 1 minute...');

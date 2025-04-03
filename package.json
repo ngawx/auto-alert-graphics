@@ -12,6 +12,7 @@
   "dependencies": {
     "@mapbox/polyline": "^1.2.1",
     "canvas": "^3.1.0",
-    "node-fetch": "^3.3.2"
+    "node-fetch": "^3.3.2",
+    "twitter-api-v2": "^1.22.0"
   }
 }
